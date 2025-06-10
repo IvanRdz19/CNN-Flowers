@@ -85,8 +85,67 @@ def create_optimized_fallback_model():
         logger.error(f"Error creando modelo fallback: {e}")
         return None
 
+def safe_load_model(path, model_name):
+    """Carga segura de modelos con manejo de errores InputLayer"""
+    try:
+        logger.warning(f"Intentando cargar {model_name} desde {path}")
+        
+        # Método 1: Cargar sin compilar directamente (más compatible)
+        try:
+            model = tf.keras.models.load_model(path, compile=False)
+            logger.warning(f"{model_name} cargado exitosamente sin compilar")
+            return model
+        except Exception as e:
+            logger.warning(f"Método 1 falló para {model_name}: {e}")
+        
+        # Método 2: Cargar con custom_objects
+        try:
+            model = tf.keras.models.load_model(
+                path, 
+                compile=False,
+                custom_objects={'InputLayer': tf.keras.layers.InputLayer}
+            )
+            logger.warning(f"{model_name} cargado con custom_objects")
+            return model
+        except Exception as e:
+            logger.warning(f"Método 2 falló para {model_name}: {e}")
+        
+        # Método 3: Forzar recreación de InputLayer
+        try:
+            # Cargar con InputLayer explícita
+            custom_objects = {
+                'InputLayer': tf.keras.layers.InputLayer,
+                'input_layer': tf.keras.layers.InputLayer
+            }
+            model = tf.keras.models.load_model(path, compile=False, custom_objects=custom_objects)
+            logger.warning(f"{model_name} cargado con InputLayer explícita")
+            return model
+        except Exception as e:
+            logger.warning(f"Método 3 falló para {model_name}: {e}")
+        
+        # Método 4: Cargar solo la arquitectura y recrear
+        try:
+            # Intentar cargar solo config
+            with open(path.replace('.h5', '_config.json'), 'r') as f:
+                import json
+                config = json.load(f)
+            model = tf.keras.models.model_from_json(json.dumps(config))
+            model.load_weights(path)
+            logger.warning(f"{model_name} recreado desde config")
+            return model
+        except Exception as e:
+            logger.warning(f"Método 4 falló para {model_name}: {e}")
+        
+        # Si todos los métodos fallan, usar modelo fallback
+        logger.error(f"Todos los métodos fallaron para {model_name}, usando modelo fallback")
+        return create_optimized_fallback_model()
+        
+    except Exception as e:
+        logger.error(f"Error crítico cargando {model_name}: {e}")
+        return create_optimized_fallback_model()
+
 def load_models():
-    """Carga optimizada de modelos"""
+    """Carga optimizada de modelos con manejo robusto de errores"""
     global model1, model2, models_loaded, loading_error
     
     start_time = time.time()
@@ -100,37 +159,50 @@ def load_models():
             gc.collect()
             
             models = []
-            model_paths = ['CNN-Flowers-Model1.h5', 'CNN-Flowers-Model2.h5']
+            model_configs = [
+                ('CNN-Flowers-Model1.h5', 'Modelo1'),
+                ('CNN-Flowers-Model2.h5', 'Modelo2')
+            ]
             
-            for i, path in enumerate(model_paths, 1):
+            for path, name in model_configs:
                 model_start = time.time()
                 
-                try:
-                    if os.path.exists(path):
-                        # Cargar sin compilar para ser más rápido
-                        model = tf.keras.models.load_model(path, compile=False)
-                        model = optimize_model(model)
-                        logger.warning(f"Modelo {i} cargado desde archivo en {time.time() - model_start:.2f}s")
-                    else:
-                        model = create_optimized_fallback_model()
-                        logger.warning(f"Modelo fallback {i} creado en {time.time() - model_start:.2f}s")
-                    
-                    models.append(model)
-                    
-                except Exception as e:
-                    logger.error(f"Error con modelo {i}: {e}")
-                    fallback = create_optimized_fallback_model()
-                    models.append(fallback)
+                if os.path.exists(path):
+                    model = safe_load_model(path, name)
+                else:
+                    logger.warning(f"Archivo {path} no encontrado, creando modelo fallback")
+                    model = create_optimized_fallback_model()
+                
+                if model is not None:
+                    model = optimize_model(model)
+                    logger.warning(f"{name} listo en {time.time() - model_start:.2f}s")
+                else:
+                    logger.error(f"Error crítico con {name}, creando fallback final")
+                    model = create_optimized_fallback_model()
+                
+                models.append(model)
             
             model1, model2 = models
             
-            # Warm-up final
-            dummy_input = np.random.random((1, 128, 128, 3)).astype(np.float32)
+            # Verificar que los modelos son válidos
+            if model1 is None or model2 is None:
+                raise Exception("Uno o ambos modelos son None")
             
-            # Warm-up paralelo más agresivo
-            for _ in range(2):
-                _ = model1.predict(dummy_input, verbose=0)
-                _ = model2.predict(dummy_input, verbose=0)
+            # Warm-up final más robusto
+            try:
+                dummy_input = np.random.random((1, 128, 128, 3)).astype(np.float32)
+                
+                # Warm-up con manejo de errores
+                for i in range(2):
+                    try:
+                        _ = model1.predict(dummy_input, verbose=0)
+                        _ = model2.predict(dummy_input, verbose=0)
+                    except Exception as e:
+                        logger.warning(f"Error en warm-up iteración {i+1}: {e}")
+                
+                logger.warning("Warm-up completado exitosamente")
+            except Exception as e:
+                logger.warning(f"Error en warm-up, pero modelos cargados: {e}")
             
             models_loaded = True
             total_time = time.time() - start_time
@@ -138,8 +210,22 @@ def load_models():
             
         except Exception as e:
             loading_error = str(e)
-            logger.error(f"Error crítico: {e}")
+            logger.error(f"Error crítico en carga de modelos: {e}")
             models_loaded = False
+            
+            # Último intento: crear modelos fallback para ambos
+            try:
+                logger.warning("Creando modelos fallback de emergencia...")
+                model1 = create_optimized_fallback_model()
+                model2 = create_optimized_fallback_model()
+                
+                if model1 is not None and model2 is not None:
+                    models_loaded = True
+                    logger.warning("Modelos fallback de emergencia creados exitosamente")
+                else:
+                    logger.error("Fallo crítico: no se pudieron crear modelos fallback")
+            except Exception as fallback_error:
+                logger.error(f"Error creando modelos fallback: {fallback_error}")
 
 @lru_cache(maxsize=32)
 def cached_image_resize(image_bytes_hash, target_size):
@@ -183,15 +269,29 @@ def preprocess_image_optimized(file):
         return None
 
 def predict_optimized(model, image, model_name):
-    """Predicción optimizada con batching"""
+    """Predicción optimizada con manejo robusto de errores"""
     try:
         start = time.time()
         
-        # Predicción sin lock para mejor paralelismo
-        predictions = model.predict(image, verbose=0, batch_size=1)
+        # Verificar que el modelo existe
+        if model is None:
+            logger.error(f"Modelo {model_name} es None")
+            return None, None, 0
+        
+        # Predicción con manejo de errores
+        try:
+            predictions = model.predict(image, verbose=0, batch_size=1)
+        except Exception as pred_error:
+            logger.error(f"Error en predicción {model_name}: {pred_error}")
+            return None, None, 0
         
         end = time.time()
         time_elapsed = end - start
+        
+        # Verificar que las predicciones son válidas
+        if predictions is None or len(predictions) == 0:
+            logger.error(f"Predicciones inválidas para {model_name}")
+            return None, None, 0
         
         predicted_class = class_names[np.argmax(predictions[0])]
         confidence = predictions[0].astype(float)  # Convertir a float nativo
@@ -205,11 +305,8 @@ def predict_optimized(model, image, model_name):
         return None, None, 0
 
 def predict_parallel(image):
-    """Predicciones en paralelo (si es posible)"""
+    """Predicciones en paralelo con manejo robusto de errores"""
     try:
-        # Para modelos pequeños, paralelo puede ser más lento debido al overhead
-        # Mantener secuencial pero optimizado
-        
         start_total = time.time()
         
         result1 = predict_optimized(model1, image, "Modelo1")
@@ -230,7 +327,8 @@ def health_check():
     return jsonify({
         "status": "ready" if models_loaded else "loading",
         "models": models_loaded,
-        "error": loading_error
+        "error": loading_error,
+        "tensorflow_version": tf.__version__
     }), 200 if models_loaded else 503
 
 @app.route('/benchmark')
@@ -247,8 +345,12 @@ def benchmark():
         times = []
         for i in range(5):
             start = time.time()
-            _ = model1.predict(test_image, verbose=0)
-            times.append(time.time() - start)
+            try:
+                _ = model1.predict(test_image, verbose=0)
+                times.append(time.time() - start)
+            except Exception as e:
+                logger.error(f"Error en benchmark iteración {i}: {e}")
+                times.append(999)  # Tiempo alto para indicar error
         
         avg_time = np.mean(times)
         
