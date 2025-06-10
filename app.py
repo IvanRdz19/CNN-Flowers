@@ -28,27 +28,55 @@ models_loaded = False
 class_names = ['daisy', 'dandelion', 'rose', 'sunflower', 'tulip']
 
 def load_models():
-    """Carga los modelos de forma optimizada"""
+    """Carga los modelos de forma optimizada con manejo de errores de compatibilidad"""
     global model1, model2, models_loaded
     try:
         app.logger.info("Cargando modelos...")
         
-        # Configurar TensorFlow para usar menos memoria
-        tf.config.experimental.enable_memory_growth = True
+        # Configurar TensorFlow para compatibilidad
+        K = tf.keras.backend
+        K.clear_session()
         
-        model1 = tf.keras.models.load_model('CNN-Flowers-Model1.h5', compile=False)
-        model2 = tf.keras.models.load_model('CNN-Flowers-Model2.h5', compile=False)
+        # Intentar cargar con diferentes métodos
+        try:
+            # Método 1: Carga normal
+            model1 = tf.keras.models.load_model('CNN-Flowers-Model1.h5', compile=False)
+            model2 = tf.keras.models.load_model('CNN-Flowers-Model2.h5', compile=False)
+        except Exception as e1:
+            app.logger.warning(f"Método 1 falló: {str(e1)}")
+            try:
+                # Método 2: Con custom_objects vacío
+                model1 = tf.keras.models.load_model('CNN-Flowers-Model1.h5', 
+                                                  compile=False, 
+                                                  custom_objects={})
+                model2 = tf.keras.models.load_model('CNN-Flowers-Model2.h5', 
+                                                  compile=False, 
+                                                  custom_objects={})
+            except Exception as e2:
+                app.logger.warning(f"Método 2 falló: {str(e2)}")
+                # Método 3: Carga con safe_mode
+                model1 = tf.keras.models.load_model('CNN-Flowers-Model1.h5', 
+                                                  compile=False,
+                                                  safe_mode=False)
+                model2 = tf.keras.models.load_model('CNN-Flowers-Model2.h5', 
+                                                  compile=False,
+                                                  safe_mode=False)
+        
+        # Verificar que los modelos se cargaron correctamente
+        if model1 is None or model2 is None:
+            raise Exception("Los modelos no se cargaron correctamente")
         
         # Warm up - hacer una predicción dummy para inicializar
-        dummy_input = np.random.random((1, 128, 128, 3))
-        model1.predict(dummy_input, verbose=0)
-        model2.predict(dummy_input, verbose=0)
+        dummy_input = np.random.random((1, 128, 128, 3)).astype(np.float32)
+        _ = model1.predict(dummy_input, verbose=0)
+        _ = model2.predict(dummy_input, verbose=0)
         
         models_loaded = True
         app.logger.info("Modelos cargados exitosamente")
         
     except Exception as e:
         app.logger.error(f"Error cargando modelos: {str(e)}")
+        app.logger.error(f"Tipo de error: {type(e).__name__}")
         models_loaded = False
 
 def preprocess_image_from_memory(file):
