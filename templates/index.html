@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <title>Clasificador de Flores</title>
+  <style>
+    :root {
+      --primary: #e91e63;
+      --secondary: #4caf50;
+      --accent: #ffc107;
+    }
+    body {
+      font-family: Arial;
+      text-align: center;
+      padding: 20px;
+      background-color: #f8f9fa;
+    }
+    h1 {
+      color: var(--primary);
+    }
+    .dropzone {
+      border: 2px dashed #aaa;
+      border-radius: 10px;
+      padding: 40px;
+      cursor: pointer;
+      margin-bottom: 20px;
+      background-color: #ffffff;
+      position: relative;
+    }
+    .dropzone.dragover {
+      background-color: #e0f7fa;
+    }
+    #image-preview {
+      margin-top: 20px;
+      max-width: 200px;
+      max-height: 200px;
+      display: none;
+    }
+    img#uploaded-image {
+      margin-top: 20px;
+      max-width: 300px;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .models-container {
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+      margin-top: 30px;
+    }
+    .model-card {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 10px;
+      min-width: 300px;
+      background-color: #ffffff;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      transition: transform 0.3s, box-shadow 0.3s;
+    }
+    .model-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+    }
+    .model-card:nth-child(1) {
+      border-top: 4px solid var(--primary);
+    }
+    .model-card:nth-child(2) {
+      border-top: 4px solid var(--secondary);
+    }
+    canvas {
+      margin-top: 20px;
+    }
+    button {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #d81b60;
+    }
+    .loader {
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid var(--primary);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+      display: none;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .comparison-container {
+      display: flex;
+      justify-content: space-around;
+      margin: 30px 0;
+      flex-wrap: wrap;
+    }
+    .comparison-card {
+      text-align: center;
+      width: 45%;
+      min-width: 300px;
+      margin: 10px;
+      padding: 20px;
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .confidence-bar-container {
+      width: 100%;
+      background: #eee;
+      border-radius: 10px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+    .confidence-bar {
+      height: 30px;
+      border-radius: 10px;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      width: 0%; /* Valor inicial */
+      transition: width 0.5s ease-in-out; /* Animación suave */
+    }
+    .model1-bar {
+      background: var(--primary);
+    }
+    .model2-bar {
+      background: var(--secondary);
+    }
+    .prediction-result {
+      font-size: 20px;
+      margin: 10px 0;
+    }
+    @media (max-width: 768px) {
+      .models-container, .comparison-container {
+        flex-direction: column;
+        align-items: center;
+      }
+      .comparison-card {
+        width: 90%;
+      }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .results-section {
+      animation: fadeIn 0.6s ease-out;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🌺 Identificador de flores 🌺</h1>
+
+<form method="POST" enctype="multipart/form-data">
+  <div class="dropzone" id="dropzone">
+    Arrastra y suelta una imagen o selecciona un archivo
+    <input type="file" name="file" id="fileInput" style="display: none;" accept="image/*">
+    <img id="image-preview">
+  </div>
+  <button type="submit">Clasificar</button>
+</form>
+
+<div class="loader" id="loader"></div>
+
+{% if prediction1 or prediction2 %}
+<div class="results-section">
+  <!-- Comparación lado a lado - CORREGIDO -->
+  <div class="comparison-container">
+    <div class="comparison-card">
+      <h2>Modelo Complejo</h2>
+      <div class="prediction-result">{{ prediction1 }} ({{ confidence1 }}%)</div>
+      <div class="confidence-bar-container">
+        <!-- SOLUCIÓN 1: Sin estilo inline, se establece via JavaScript -->
+        <div class="confidence-bar model1-bar" id="confidence-bar-1" data-confidence="{{ confidence1 }}">{{ confidence1 }}%</div>
+      </div>
+      <p><strong>Precisión global:</strong> {{ accuracy1 }}%</p>
+      <p><strong>Tiempo:</strong> {{ time1 }} s</p>
+    </div>
+    <div class="comparison-card">
+      <h2>Modelo Ligero</h2>
+      <div class="prediction-result">{{ prediction2 }} ({{ confidence2 }}%)</div>
+      <div class="confidence-bar-container">
+        <!-- SOLUCIÓN 1: Sin estilo inline, se establece via JavaScript -->
+        <div class="confidence-bar model2-bar" id="confidence-bar-2" data-confidence="{{ confidence2 }}">{{ confidence2 }}%</div>
+      </div>
+      <p><strong>Precisión global:</strong> {{ accuracy2 }}%</p>
+      <p><strong>Tiempo:</strong> {{ time2 }} s</p>
+    </div>
+  </div>
+
+  <div class="models-container">
+    <!-- Modelo 1 -->
+    <div class="model-card">
+      <h2>Modelo 1 (complejo)</h2>
+      <p><strong>Predicción:</strong> {{ prediction1 }}</p>
+      <p><strong>Precisión global:</strong> {{ accuracy1 }}%</p>
+      <p><strong>Tiempo de predicción:</strong> {{ time1 }} s</p>
+      <h4>Probabilidades:</h4>
+      <ul style="list-style: none; padding: 0;">
+        {% for class_name, percent in percentages1 %}
+          <li>{{ class_name }}: {{ percent }}%</li>
+        {% endfor %}
+      </ul>
+      <canvas id="chart1" width="300" height="200"></canvas>
+    </div>
+
+    <!-- Modelo 2 -->
+    <div class="model-card">
+      <h2>Modelo 2 (ligero)</h2>
+      <p><strong>Predicción:</strong> {{ prediction2 }}</p>
+      <p><strong>Precisión global:</strong> {{ accuracy2 }}%</p>
+      <p><strong>Tiempo de predicción:</strong> {{ time2 }} s</p>
+      <h4>Probabilidades:</h4>
+      <ul style="list-style: none; padding: 0;">
+        {% for class_name, percent in percentages2 %}
+          <li>{{ class_name }}: {{ percent }}%</li>
+        {% endfor %}
+      </ul>
+      <canvas id="chart2" width="300" height="200"></canvas>
+    </div>
+  </div>
+
+  <img id="uploaded-image" src="{{ url_for('static', filename='uploads/' + filename) }}">
+</div>
+{% endif %}
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- JS mejorado -->
+<script>
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const imagePreview = document.getElementById('image-preview');
+  const loader = document.getElementById('loader');
+  const form = document.querySelector('form');
+
+  // Vista previa
+  fileInput.addEventListener('change', function(e) {
+    if (e.target.files[0]) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        imagePreview.src = e.target.result;
+        imagePreview.style.display = 'block';
+      }
+      reader.readAsDataURL(e.target.files[0]);
+    }
+  });
+
+  // Drag and drop
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('dragover');
+  });
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('dragover');
+  });
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    fileInput.files = e.dataTransfer.files;
+    dropzone.classList.remove('dragover');
+    // Mostrar vista previa
+    if (e.dataTransfer.files[0]) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        imagePreview.src = e.target.result;
+        imagePreview.style.display = 'block';
+      }
+      reader.readAsDataURL(e.dataTransfer.files[0]);
+    }
+  });
+
+  // Mostrar loader al enviar
+  form.addEventListener('submit', function() {
+    loader.style.display = 'block';
+  });
+
+  // SOLUCIÓN 1: Establecer el ancho de las barras de confianza via JavaScript
+  document.addEventListener('DOMContentLoaded', function() {
+    // Barra del modelo 1
+    const bar1 = document.getElementById('confidence-bar-1');
+    if (bar1) {
+      const confidence1 = bar1.getAttribute('data-confidence');
+      bar1.style.width = confidence1 + '%';
+    }
+    
+    // Barra del modelo 2
+    const bar2 = document.getElementById('confidence-bar-2');
+    if (bar2) {
+      const confidence2 = bar2.getAttribute('data-confidence');
+      bar2.style.width = confidence2 + '%';
+    }
+  });
+</script>
+
+{% if prediction1 and prediction2 and class_names and percentages1 and percentages2 %}
+  <!-- Datos embebidos en JSON -->
+  <script id="model-data" type="application/json">
+    {
+      "labels": {{ class_names | tojson }},
+      "model1": {{ percentages1 | map(attribute=1) | list | tojson }},
+      "model2": {{ percentages2 | map(attribute=1) | list | tojson }}
+    }
+  </script>
+
+  <script>
+    const jsonScript = document.getElementById('model-data');
+    if (jsonScript) {
+      const { labels, model1, model2 } = JSON.parse(jsonScript.textContent);
+
+      new Chart(document.getElementById('chart1'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Modelo 1',
+            data: model1,
+            backgroundColor: '#26a69a'
+          }]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: true, max: 100 }
+          }
+        }
+      });
+
+      new Chart(document.getElementById('chart2'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Modelo 2',
+            data: model2,
+            backgroundColor: '#7e57c2'
+          }]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: true, max: 100 }
+          }
+        }
+      });
+    }
+  </script>
+{% endif %}
+
+</body>
+</html>
