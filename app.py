@@ -6,9 +6,15 @@ import numpy as np
 from PIL import Image
 import tensorflow as tf
 
+# Configurar TensorFlow para suprimir mensajes informativos
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Crear el directorio de uploads si no existe
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Carga de modelos
 model1 = tf.keras.models.load_model('CNN-Flowers-Model1.h5')
@@ -35,44 +41,63 @@ def predict_with_benchmark(model, image):
 def index():
     if request.method == 'POST':
         file = request.files['file']
-        if not file:
+        if not file or file.filename == '':
             return redirect(request.url)
 
         filename = secure_filename(file.filename)
+        if not filename:
+            return redirect(request.url)
+            
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-
-        image = preprocess_image(filepath)
-
-        # Modelo 1
-        prediction1, confidences1, time1 = predict_with_benchmark(model1, image)
-        accuracy1 = 0.70
-
-        # Modelo 2
-        prediction2, confidences2, time2 = predict_with_benchmark(model2, image)
-        accuracy2 = 0.80
-
-        # Prepara porcentajes
-        percentages1 = [(class_names[i], round(float(confidences1[i]) * 100, 2)) for i in range(len(class_names))]
-        percentages2 = [(class_names[i], round(float(confidences2[i]) * 100, 2)) for i in range(len(class_names))]
         
-        # Obtener confianza de la clase predicha
-        confidence1_value = next(percent for class_name, percent in percentages1 if class_name == prediction1)
-        confidence2_value = next(percent for class_name, percent in percentages2 if class_name == prediction2)
+        try:
+            # Guardar archivo
+            file.save(filepath)
+            
+            # Procesar imagen
+            image = preprocess_image(filepath)
 
-        return render_template("index.html",
-                               prediction1=prediction1,
-                               prediction2=prediction2,
-                               percentages1=percentages1,
-                               percentages2=percentages2,
-                               class_names=class_names,
-                               accuracy1=round(accuracy1 * 100, 2),
-                               accuracy2=round(accuracy2 * 100, 2),
-                               time1=round(time1, 3),
-                               time2=round(time2, 3),
-                               filename=filename,
-                               confidence1=confidence1_value,
-                               confidence2=confidence2_value)
+            # Modelo 1
+            prediction1, confidences1, time1 = predict_with_benchmark(model1, image)
+            accuracy1 = 0.70
+
+            # Modelo 2
+            prediction2, confidences2, time2 = predict_with_benchmark(model2, image)
+            accuracy2 = 0.80
+
+            # Prepara porcentajes
+            percentages1 = [(class_names[i], round(float(confidences1[i]) * 100, 2)) for i in range(len(class_names))]
+            percentages2 = [(class_names[i], round(float(confidences2[i]) * 100, 2)) for i in range(len(class_names))]
+            
+            # Obtener confianza de la clase predicha
+            confidence1_value = next(percent for class_name, percent in percentages1 if class_name == prediction1)
+            confidence2_value = next(percent for class_name, percent in percentages2 if class_name == prediction2)
+
+            return render_template("index.html",
+                                   prediction1=prediction1,
+                                   prediction2=prediction2,
+                                   percentages1=percentages1,
+                                   percentages2=percentages2,
+                                   class_names=class_names,
+                                   accuracy1=round(accuracy1 * 100, 2),
+                                   accuracy2=round(accuracy2 * 100, 2),
+                                   time1=round(time1, 3),
+                                   time2=round(time2, 3),
+                                   filename=filename,
+                                   confidence1=confidence1_value,
+                                   confidence2=confidence2_value)
+        
+        except Exception as e:
+            app.logger.error(f"Error procesando imagen: {str(e)}")
+            return render_template("index.html", error="Error procesando la imagen")
+        
+        finally:
+            # Limpiar archivo temporal (opcional)
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
 
     return render_template("index.html")
 
