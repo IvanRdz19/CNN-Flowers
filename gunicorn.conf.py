@@ -1,65 +1,55 @@
 import os
-import multiprocessing
 
 # Server socket
 bind = f"0.0.0.0:{os.environ.get('PORT', 5000)}"
-backlog = 2048
+backlog = 1024
 
-# Worker processes - Para ML es mejor usar pocos workers
-workers = 1
+# Workers optimizados para velocidad
+workers = 1  # 1 worker para evitar overhead de carga de modelos
 worker_class = "sync"
-worker_connections = 1000
+worker_connections = 500
 
-# Timeouts más largos para ML
-timeout = 300  # 5 minutos para carga de modelos y predicciones
-keepalive = 5
-graceful_timeout = 30
+# Timeouts optimizados
+timeout = 60  # Reducido para forzar respuestas más rápidas
+keepalive = 2
+graceful_timeout = 15
 
-# Memory management
-max_requests = 50  # Reiniciar workers más frecuentemente para ML
-max_requests_jitter = 10
+# Memory management agresivo
+max_requests = 200  # Más requests antes de reiniciar
+max_requests_jitter = 20
 
-# Logging
-accesslog = "-"
+# Logging mínimo para velocidad
+accesslog = None  # Desactivar access log para velocidad
 errorlog = "-"
-loglevel = "info"
-access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
+loglevel = "warning"  # Solo warnings y errors
 
 # Process naming
-proc_name = 'cnn-flowers-app'
+proc_name = 'fast-cnn-flowers'
 
-# Server mechanics
-preload_app = True  # Importante para cargar modelos una vez
+# Server mechanics optimizados
+preload_app = True
 daemon = False
-pidfile = None
-user = None
-group = None
+reuse_port = True  # Mejora performance en Linux
 
-# Límites de memoria (importante para ML)
-limit_request_line = 8190
-limit_request_fields = 200
+# Límites optimizados
+limit_request_line = 4096
+limit_request_fields = 100
 limit_request_field_size = 8190
 
-# Worker timeout específico para startup
-worker_timeout = 120
+# Buffer sizes optimizados
+worker_tmp_dir = "/tmp"  # Usar RAM disk si está disponible
 
-# SSL
-keyfile = None
-certfile = None
+# Configuraciones para CPU
+worker_class = "sync"  # Mejor para CPU-bound tasks como ML
 
-# Configuraciones específicas para ML
+# Callbacks optimizados
 def when_ready(server):
-    """Callback cuando el servidor está listo"""
-    server.log.info("Servidor listo - Modelos de ML inicializados")
+    server.log.info("🚀 Servidor optimizado listo")
 
 def worker_int(worker):
-    """Callback para manejar interrupciones del worker"""
-    worker.log.info("Worker interrupted")
+    worker.log.info("Worker interrumpido limpiamente")
 
-def pre_fork(server, worker):
-    """Callback antes de hacer fork del worker"""
-    server.log.info("Worker spawned (pid: %s)", worker.pid)
-
-def post_fork(server, worker):
-    """Callback después de hacer fork del worker"""
-    server.log.info("Worker spawned (pid: %s)", worker.pid)
+# Variables de entorno adicionales para optimización
+import os
+os.environ['MALLOC_TRIM_THRESHOLD_'] = '100000'
+os.environ['MALLOC_MMAP_THRESHOLD_'] = '131072'

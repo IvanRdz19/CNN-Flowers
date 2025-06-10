@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 import os
 import time
@@ -7,22 +7,24 @@ from PIL import Image
 import tensorflow as tf
 import logging
 import io
-from concurrent.futures import ThreadPoolExecutor
 import threading
+from functools import lru_cache
+import gc
 
-# Configurar TensorFlow para optimización
+# Configuración optimizada de TensorFlow
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'  # Optimizaciones Intel
+os.environ['OMP_NUM_THREADS'] = '2'  # Limitar threads para CPU
+
+# Configurar TensorFlow para CPU optimizado
+tf.config.threading.set_intra_op_parallelism_threads(2)
+tf.config.threading.set_inter_op_parallelism_threads(2)
 
 app = Flask(__name__)
-UPLOAD_FOLDER = 'static/uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024  # Reducir a 8MB
 
-# Crear el directorio de uploads si no existe
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# Variables globales para modelos con lock para thread safety
+# Variables globales optimizadas
 model1 = None
 model2 = None
 models_loaded = False
@@ -31,254 +33,282 @@ loading_error = None
 
 class_names = ['daisy', 'dandelion', 'rose', 'sunflower', 'tulip']
 
-# Configurar logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Cache para predicciones (opcional)
+prediction_cache = {}
+MAX_CACHE_SIZE = 100
+
+# Configurar logging optimizado
+logging.basicConfig(level=logging.WARNING)  # Menos verbose
 logger = logging.getLogger(__name__)
 
-def create_fallback_model():
-    """Crea un modelo básico de CNN para clasificación de flores"""
+def optimize_model(model):
+    """Optimiza un modelo para inferencia rápida"""
     try:
-        logger.info("Creando modelo fallback...")
+        # Compilar para inferencia (sin métricas de entrenamiento)
+        model.compile(
+            optimizer='adam',
+            loss='sparse_categorical_crossentropy',
+            run_eagerly=False  # Usar graph mode para mejor performance
+        )
+        
+        # Warm-up con predicción dummy
+        dummy_input = np.random.random((1, 128, 128, 3)).astype(np.float32)
+        
+        # Hacer varias predicciones para estabilizar
+        for _ in range(3):
+            _ = model.predict(dummy_input, verbose=0)
+        
+        return model
+    except Exception as e:
+        logger.error(f"Error optimizando modelo: {e}")
+        return model
+
+def create_optimized_fallback_model():
+    """Crea un modelo fallback optimizado y más pequeño"""
+    try:
         model = tf.keras.Sequential([
             tf.keras.layers.Input(shape=(128, 128, 3)),
+            # Modelo más pequeño y rápido
+            tf.keras.layers.Conv2D(16, (5, 5), activation='relu', strides=2),
+            tf.keras.layers.MaxPooling2D(2, 2),
             tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
             tf.keras.layers.MaxPooling2D(2, 2),
             tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
-            tf.keras.layers.MaxPooling2D(2, 2),
-            tf.keras.layers.Conv2D(128, (3, 3), activation='relu'),
-            tf.keras.layers.MaxPooling2D(2, 2),
-            tf.keras.layers.Flatten(),
-            tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dropout(0.5),
+            tf.keras.layers.GlobalAveragePooling2D(),  # Más eficiente que Flatten
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dropout(0.3),
             tf.keras.layers.Dense(5, activation='softmax')
         ])
         
-        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-        
-        # Warm up
-        dummy_input = np.random.random((1, 128, 128, 3)).astype(np.float32)
-        _ = model.predict(dummy_input, verbose=0)
-        
-        logger.info("Modelo fallback creado exitosamente")
-        return model
+        return optimize_model(model)
     except Exception as e:
-        logger.error(f"Error creando modelo fallback: {str(e)}")
+        logger.error(f"Error creando modelo fallback: {e}")
         return None
 
 def load_models():
-    """Carga los modelos de forma síncrona con mejor manejo de errores"""
+    """Carga optimizada de modelos"""
     global model1, model2, models_loaded, loading_error
+    
+    start_time = time.time()
     
     with model_lock:
         try:
-            logger.info("Iniciando carga de modelos...")
-            tf.keras.backend.clear_session()
+            logger.warning("Iniciando carga de modelos...")
             
-            # Intentar cargar modelos reales
-            model_paths = ['CNN-Flowers-Model1.h5', 'CNN-Flowers-Model2.h5']
+            # Limpiar sesión anterior
+            tf.keras.backend.clear_session()
+            gc.collect()
+            
             models = []
+            model_paths = ['CNN-Flowers-Model1.h5', 'CNN-Flowers-Model2.h5']
             
             for i, path in enumerate(model_paths, 1):
+                model_start = time.time()
+                
                 try:
                     if os.path.exists(path):
-                        logger.info(f"Cargando modelo {i} desde {path}...")
+                        # Cargar sin compilar para ser más rápido
                         model = tf.keras.models.load_model(path, compile=False)
-                        logger.info(f"Modelo {i} cargado exitosamente")
+                        model = optimize_model(model)
+                        logger.warning(f"Modelo {i} cargado desde archivo en {time.time() - model_start:.2f}s")
                     else:
-                        logger.warning(f"Archivo {path} no encontrado, usando modelo fallback")
-                        model = create_fallback_model()
-                    
-                    if model is None:
-                        raise Exception(f"No se pudo crear modelo {i}")
+                        model = create_optimized_fallback_model()
+                        logger.warning(f"Modelo fallback {i} creado en {time.time() - model_start:.2f}s")
                     
                     models.append(model)
                     
                 except Exception as e:
-                    logger.error(f"Error cargando modelo {i}: {str(e)}")
-                    logger.info(f"Creando modelo fallback para modelo {i}")
-                    fallback = create_fallback_model()
-                    if fallback is None:
-                        raise Exception(f"No se pudo crear modelo fallback {i}")
+                    logger.error(f"Error con modelo {i}: {e}")
+                    fallback = create_optimized_fallback_model()
                     models.append(fallback)
             
             model1, model2 = models
             
-            # Warm up ambos modelos
-            logger.info("Realizando warm-up de modelos...")
+            # Warm-up final
             dummy_input = np.random.random((1, 128, 128, 3)).astype(np.float32)
             
-            _ = model1.predict(dummy_input, verbose=0)
-            _ = model2.predict(dummy_input, verbose=0)
+            # Warm-up paralelo más agresivo
+            for _ in range(2):
+                _ = model1.predict(dummy_input, verbose=0)
+                _ = model2.predict(dummy_input, verbose=0)
             
             models_loaded = True
-            loading_error = None
-            logger.info("Todos los modelos cargados y listos")
+            total_time = time.time() - start_time
+            logger.warning(f"Todos los modelos listos en {total_time:.2f}s")
             
         except Exception as e:
-            error_msg = f"Error crítico cargando modelos: {str(e)}"
-            logger.error(error_msg)
-            loading_error = error_msg
+            loading_error = str(e)
+            logger.error(f"Error crítico: {e}")
             models_loaded = False
 
-def wait_for_models(timeout=60):
-    """Espera a que los modelos se carguen o timeout"""
-    start_time = time.time()
-    while not models_loaded and (time.time() - start_time) < timeout:
-        if loading_error:
-            return False
-        time.sleep(0.5)
-    return models_loaded
+@lru_cache(maxsize=32)
+def cached_image_resize(image_bytes_hash, target_size):
+    """Cache para redimensionamiento de imágenes"""
+    # Esta función es solo para el concepto - no podemos cachear bytes directamente
+    pass
 
-def preprocess_image_from_file(file):
-    """Procesa imagen con mejor manejo de errores"""
+def preprocess_image_optimized(file):
+    """Procesamiento de imagen optimizado"""
     try:
-        logger.info("Procesando imagen...")
+        start_time = time.time()
         
-        # Reset file pointer to beginning
+        # Leer directamente a bytes
         file.stream.seek(0)
+        image_bytes = file.stream.read()
         
-        # Leer todos los bytes
-        file_bytes = file.stream.read()
+        # Crear imagen de forma más eficiente
+        img = Image.open(io.BytesIO(image_bytes))
         
-        # Crear imagen desde bytes
-        img = Image.open(io.BytesIO(file_bytes))
-        
-        # Convertir a RGB si es necesario
+        # Optimizaciones de PIL
         if img.mode != 'RGB':
             img = img.convert('RGB')
         
-        # Redimensionar
-        img = img.resize((128, 128), Image.Resampling.LANCZOS)
+        # Redimensionar con algoritmo más rápido para inferencia
+        img = img.resize((128, 128), Image.Resampling.BILINEAR)  # Más rápido que LANCZOS
         
-        # Convertir a array numpy
-        img_array = np.array(img, dtype=np.float32) / 255.0
+        # Conversión optimizada a numpy
+        img_array = np.asarray(img, dtype=np.float32)
+        img_array = img_array / 255.0
         
-        # Expandir dimensiones para batch
+        # Expandir dimensiones
         result = np.expand_dims(img_array, axis=0)
         
-        logger.info(f"Imagen procesada exitosamente. Shape: {result.shape}")
+        process_time = time.time() - start_time
+        logger.warning(f"Imagen procesada en {process_time:.3f}s")
+        
         return result
         
     except Exception as e:
-        logger.error(f"Error procesando imagen: {str(e)}")
+        logger.error(f"Error procesando imagen: {e}")
         return None
 
-def predict_with_model(model, image, model_name):
-    """Predicción con manejo de errores mejorado"""
+def predict_optimized(model, image, model_name):
+    """Predicción optimizada con batching"""
     try:
-        logger.info(f"Realizando predicción con {model_name}...")
         start = time.time()
         
-        with model_lock:
-            predictions = model.predict(image, verbose=0)
+        # Predicción sin lock para mejor paralelismo
+        predictions = model.predict(image, verbose=0, batch_size=1)
         
         end = time.time()
         time_elapsed = end - start
         
         predicted_class = class_names[np.argmax(predictions[0])]
-        confidence = predictions[0]
+        confidence = predictions[0].astype(float)  # Convertir a float nativo
         
-        logger.info(f"Predicción {model_name} completada: {predicted_class} "
-                   f"({float(np.max(confidence)):.2%}) en {time_elapsed:.3f}s")
+        logger.warning(f"{model_name}: {predicted_class} en {time_elapsed:.3f}s")
         
         return predicted_class, confidence, time_elapsed
         
     except Exception as e:
-        logger.error(f"Error en predicción {model_name}: {str(e)}")
+        logger.error(f"Error en {model_name}: {e}")
         return None, None, 0
+
+def predict_parallel(image):
+    """Predicciones en paralelo (si es posible)"""
+    try:
+        # Para modelos pequeños, paralelo puede ser más lento debido al overhead
+        # Mantener secuencial pero optimizado
+        
+        start_total = time.time()
+        
+        result1 = predict_optimized(model1, image, "Modelo1")
+        result2 = predict_optimized(model2, image, "Modelo2")
+        
+        total_time = time.time() - start_total
+        logger.warning(f"Predicciones totales: {total_time:.3f}s")
+        
+        return result1, result2
+        
+    except Exception as e:
+        logger.error(f"Error en predicciones paralelas: {e}")
+        return (None, None, 0), (None, None, 0)
 
 @app.route('/health')
 def health_check():
-    """Health check mejorado"""
-    status = {
-        "status": "healthy" if models_loaded else "loading",
-        "models_loaded": models_loaded,
-        "loading_error": loading_error,
-        "timestamp": time.time()
-    }
-    return jsonify(status), 200 if models_loaded else 503
-
-@app.route('/status')
-def status():
-    """Endpoint de estado detallado"""
+    """Health check rápido"""
     return jsonify({
-        "models_loaded": models_loaded,
-        "loading_error": loading_error,
-        "model1_available": model1 is not None,
-        "model2_available": model2 is not None,
-        "tensorflow_version": tf.__version__
-    })
+        "status": "ready" if models_loaded else "loading",
+        "models": models_loaded,
+        "error": loading_error
+    }), 200 if models_loaded else 503
+
+@app.route('/benchmark')
+def benchmark():
+    """Endpoint para hacer benchmark"""
+    if not models_loaded:
+        return jsonify({"error": "Models not loaded"}), 503
+    
+    try:
+        # Crear imagen de prueba
+        test_image = np.random.random((1, 128, 128, 3)).astype(np.float32)
+        
+        # Medir tiempos
+        times = []
+        for i in range(5):
+            start = time.time()
+            _ = model1.predict(test_image, verbose=0)
+            times.append(time.time() - start)
+        
+        avg_time = np.mean(times)
+        
+        return jsonify({
+            "average_prediction_time": round(avg_time, 3),
+            "times": [round(t, 3) for t in times],
+            "status": "fast" if avg_time < 1.0 else "slow"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         try:
-            logger.info("Recibida solicitud POST")
+            total_start = time.time()
             
-            # Verificar que los modelos estén cargados
+            # Verificaciones rápidas
             if not models_loaded:
-                if loading_error:
-                    error_msg = f"Error cargando modelos: {loading_error}"
-                else:
-                    error_msg = "Los modelos aún se están cargando. Intenta de nuevo en unos segundos."
-                
-                logger.warning(error_msg)
-                return render_template("index.html", error=error_msg)
+                return render_template("index.html", 
+                    error="Modelos cargando..." if not loading_error else f"Error: {loading_error}")
             
-            # Verificar archivo
             if 'file' not in request.files:
-                logger.warning("No se encontró archivo en request")
-                return render_template("index.html", error="No se seleccionó archivo")
+                return render_template("index.html", error="No hay archivo")
                 
             file = request.files['file']
-            if not file or file.filename == '':
-                logger.warning("Archivo vacío o sin nombre")
-                return render_template("index.html", error="No se seleccionó archivo válido")
+            if not file or not file.filename:
+                return render_template("index.html", error="Archivo inválido")
 
-            logger.info(f"Procesando archivo: {file.filename}")
+            # Verificar extensión rápidamente
+            ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+            if ext not in {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}:
+                return render_template("index.html", error="Formato no soportado")
 
-            # Verificar tipo de archivo
-            allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
-            if not ('.' in file.filename and 
-                    file.filename.rsplit('.', 1)[1].lower() in allowed_extensions):
-                return render_template("index.html", 
-                                     error="Formato no válido. Use: PNG, JPG, JPEG, GIF, BMP, WEBP")
-
-            # Procesar imagen
-            image = preprocess_image_from_file(file)
+            # Procesamiento optimizado
+            image = preprocess_image_optimized(file)
             if image is None:
-                return render_template("index.html", error="Error procesando la imagen")
+                return render_template("index.html", error="Error procesando imagen")
 
-            # Realizar predicciones
-            result1 = predict_with_model(model1, image, "Modelo 1")
-            result2 = predict_with_model(model2, image, "Modelo 2")
+            # Predicciones optimizadas
+            result1, result2 = predict_parallel(image)
             
             if result1[0] is None or result2[0] is None:
-                return render_template("index.html", error="Error en las predicciones")
+                return render_template("index.html", error="Error en predicciones")
             
             prediction1, confidences1, time1 = result1
             prediction2, confidences2, time2 = result2
             
-            # Valores de accuracy (ajústalos según tus modelos reales)
-            accuracy1 = 0.70
-            accuracy2 = 0.80
-
-            # Preparar porcentajes
-            percentages1 = [(class_names[i], round(float(confidences1[i]) * 100, 2)) 
+            # Preparar resultados
+            percentages1 = [(class_names[i], round(confidences1[i] * 100, 2)) 
                           for i in range(len(class_names))]
-            percentages2 = [(class_names[i], round(float(confidences2[i]) * 100, 2)) 
+            percentages2 = [(class_names[i], round(confidences2[i] * 100, 2)) 
                           for i in range(len(class_names))]
             
-            # Obtener confianza de la clase predicha
-            confidence1_value = next(percent for class_name, percent in percentages1 
-                                   if class_name == prediction1)
-            confidence2_value = next(percent for class_name, percent in percentages2 
-                                   if class_name == prediction2)
+            confidence1_value = max(p[1] for p in percentages1 if p[0] == prediction1)
+            confidence2_value = max(p[1] for p in percentages2 if p[0] == prediction2)
 
-            logger.info("Predicciones completadas exitosamente")
+            total_time = time.time() - total_start
+            logger.warning(f"Request total: {total_time:.3f}s")
 
             return render_template("index.html",
                                  prediction1=prediction1,
@@ -286,35 +316,43 @@ def index():
                                  percentages1=percentages1,
                                  percentages2=percentages2,
                                  class_names=class_names,
-                                 accuracy1=round(accuracy1 * 100, 2),
-                                 accuracy2=round(accuracy2 * 100, 2),
+                                 accuracy1=70.0,  # Valores fijos
+                                 accuracy2=80.0,
                                  time1=round(time1, 3),
                                  time2=round(time2, 3),
+                                 total_time=round(total_time, 3),
                                  filename=secure_filename(file.filename),
                                  confidence1=confidence1_value,
                                  confidence2=confidence2_value)
         
         except Exception as e:
-            logger.error(f"Error general en index: {str(e)}", exc_info=True)
-            return render_template("index.html", 
-                                 error=f"Error procesando la solicitud: {str(e)}")
+            logger.error(f"Error general: {e}")
+            return render_template("index.html", error="Error interno del servidor")
 
     return render_template("index.html")
 
-# Inicialización de la aplicación
+# Limpieza de memoria periódica
+def cleanup_memory():
+    """Limpia memoria periódicamente"""
+    import threading
+    import gc
+    
+    def cleanup():
+        while True:
+            time.sleep(300)  # Cada 5 minutos
+            gc.collect()
+    
+    cleanup_thread = threading.Thread(target=cleanup, daemon=True)
+    cleanup_thread.start()
+
 def initialize_app():
-    """Inicializa la aplicación cargando los modelos"""
-    logger.info("Inicializando aplicación...")
+    """Inicialización optimizada"""
     load_models()
-    if models_loaded:
-        logger.info("Aplicación inicializada correctamente")
-    else:
-        logger.error("Error en la inicialización de la aplicación")
+    cleanup_memory()
 
 if __name__ == '__main__':
     initialize_app()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 else:
-    # Para cuando se ejecuta con gunicorn
     initialize_app()
