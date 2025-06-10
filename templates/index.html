@@ -7,6 +7,8 @@
       --primary: #e91e63;
       --secondary: #4caf50;
       --accent: #ffc107;
+      --error: #f44336;
+      --success: #4caf50;
     }
     body {
       font-family: Arial;
@@ -17,6 +19,37 @@
     h1 {
       color: var(--primary);
     }
+    .flash-messages {
+      margin: 20px auto;
+      max-width: 600px;
+    }
+    .flash-message {
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 8px;
+      font-weight: bold;
+      animation: slideIn 0.5s ease-out;
+    }
+    .flash-error {
+      background-color: #ffebee;
+      color: var(--error);
+      border: 1px solid #ffcdd2;
+    }
+    .flash-success {
+      background-color: #e8f5e8;
+      color: var(--success);
+      border: 1px solid #c8e6c9;
+    }
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
     .dropzone {
       border: 2px dashed #aaa;
       border-radius: 10px;
@@ -25,9 +58,25 @@
       margin-bottom: 20px;
       background-color: #ffffff;
       position: relative;
+      transition: all 0.3s ease;
     }
     .dropzone.dragover {
       background-color: #e0f7fa;
+      border-color: var(--primary);
+    }
+    .dropzone.error {
+      border-color: var(--error);
+      background-color: #ffebee;
+    }
+    .file-info {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #666;
+    }
+    .supported-formats {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #888;
     }
     #image-preview {
       margin-top: 20px;
@@ -41,35 +90,6 @@
       border-radius: 8px;
       box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
-    .models-container {
-      display: flex;
-      justify-content: space-around;
-      flex-wrap: wrap;
-      margin-top: 30px;
-    }
-    .model-card {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 20px;
-      margin: 10px;
-      min-width: 300px;
-      background-color: #ffffff;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-      transition: transform 0.3s, box-shadow 0.3s;
-    }
-    .model-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 8px 15px rgba(0,0,0,0.1);
-    }
-    .model-card:nth-child(1) {
-      border-top: 4px solid var(--primary);
-    }
-    .model-card:nth-child(2) {
-      border-top: 4px solid var(--secondary);
-    }
-    canvas {
-      margin-top: 20px;
-    }
     button {
       background-color: var(--primary);
       color: white;
@@ -82,6 +102,10 @@
     }
     button:hover {
       background-color: #d81b60;
+    }
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
     }
     .loader {
       border: 5px solid #f3f3f3;
@@ -112,6 +136,14 @@
       border-radius: 8px;
       background: white;
       box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      position: relative;
+      overflow: hidden;
+    }
+    .comparison-card:nth-child(1) {
+      border-top: 4px solid var(--primary);
+    }
+    .comparison-card:nth-child(2) {
+      border-top: 4px solid var(--secondary);
     }
     .confidence-bar-container {
       width: 100%;
@@ -128,8 +160,6 @@
       align-items: center;
       justify-content: center;
       font-weight: bold;
-      width: 0%; /* Valor inicial */
-      transition: width 0.5s ease-in-out; /* Animación suave */
     }
     .model1-bar {
       background: var(--primary);
@@ -140,223 +170,418 @@
     .prediction-result {
       font-size: 20px;
       margin: 10px 0;
+      font-weight: bold;
+    }
+    .model-details {
+      margin: 15px 0;
+      padding: 10px;
+      background: #f9f9f9;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    /* Contenedor de gráficas mejorado */
+    .chart-container {
+      margin-top: 20px;
+      height: 350px;  /* Altura aumentada */
+      position: relative;
+    }
+    .probabilities-list {
+      list-style: none;
+      padding: 0;
+      margin: 15px 0;
+      text-align: left;
+      max-height: 150px;
+      overflow-y: auto;
+      border: 1px solid #eee;
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .probabilities-list li {
+      padding: 5px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .probabilities-list li:last-child {
+      border-bottom: none;
     }
     @media (max-width: 768px) {
-      .models-container, .comparison-container {
+      .comparison-container {
         flex-direction: column;
         align-items: center;
       }
       .comparison-card {
         width: 90%;
       }
+      .chart-container {
+        height: 300px; /* Altura ajustada para móviles */
+      }
     }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+    @keyframes fadeInUp {
+      from { 
+        opacity: 0; 
+        transform: translateY(30px); 
+      }
+      to { 
+        opacity: 1; 
+        transform: translateY(0); 
+      }
     }
     .results-section {
-      animation: fadeIn 0.6s ease-out;
+      animation: fadeInUp 0.8s ease-out;
+    }
+    .image-container {
+      margin-top: 30px;
+      padding: 15px;
+      background: white;
+      border-radius: 10px;
+      display: inline-block;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
   </style>
 </head>
 <body>
 
-<h1>🌺 Identificador de flores 🌺</h1>
+<h1>🌺 Detector de flores con CNNs 🌺</h1>
 
-<form method="POST" enctype="multipart/form-data">
+<!-- Mensajes flash -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="flash-messages">
+      {% for category, message in messages %}
+        <div class="flash-message flash-{{ category }}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+<form method="POST" enctype="multipart/form-data" id="uploadForm">
   <div class="dropzone" id="dropzone">
     Arrastra y suelta una imagen o selecciona un archivo
-    <input type="file" name="file" id="fileInput" style="display: none;" accept="image/*">
-    <img id="image-preview">
+    <div class="file-info" id="fileInfo"></div>
+    <div class="supported-formats">
+      Formatos soportados: JPG o PNG
+    </div>
+    <input type="file" name="file" id="fileInput" style="display: none;" accept="image/jpeg,image/jpg,image/png,image/gif,image/bmp,image/tiff">
+    <img id="image-preview" alt="Vista previa de la imagen">
   </div>
-  <button type="submit">Clasificar</button>
+  <button type="submit" id="submitBtn">Clasificar</button>
 </form>
 
 <div class="loader" id="loader"></div>
 
 {% if prediction1 or prediction2 %}
 <div class="results-section">
-  <!-- Comparación lado a lado - CORREGIDO -->
   <div class="comparison-container">
     <div class="comparison-card">
       <h2>Modelo Complejo</h2>
       <div class="prediction-result">{{ prediction1 }} ({{ confidence1 }}%)</div>
       <div class="confidence-bar-container">
-        <!-- SOLUCIÓN 1: Sin estilo inline, se establece via JavaScript -->
-        <div class="confidence-bar model1-bar" id="confidence-bar-1" data-confidence="{{ confidence1 }}">{{ confidence1 }}%</div>
+        <div class="confidence-bar model1-bar" data-width="{{ confidence1 }}">{{ confidence1 }}%</div>
       </div>
-      <p><strong>Precisión global:</strong> {{ accuracy1 }}%</p>
-      <p><strong>Tiempo:</strong> {{ time1 }} s</p>
-    </div>
-    <div class="comparison-card">
-      <h2>Modelo Ligero</h2>
-      <div class="prediction-result">{{ prediction2 }} ({{ confidence2 }}%)</div>
-      <div class="confidence-bar-container">
-        <!-- SOLUCIÓN 1: Sin estilo inline, se establece via JavaScript -->
-        <div class="confidence-bar model2-bar" id="confidence-bar-2" data-confidence="{{ confidence2 }}">{{ confidence2 }}%</div>
+      
+      <div class="model-details">
+        <p><strong>Accuracy:</strong> {{ accuracy1 }}%</p>
+        <p><strong>Tiempo:</strong> {{ time1 }} s</p>
       </div>
-      <p><strong>Precisión global:</strong> {{ accuracy2 }}%</p>
-      <p><strong>Tiempo:</strong> {{ time2 }} s</p>
-    </div>
-  </div>
-
-  <div class="models-container">
-    <!-- Modelo 1 -->
-    <div class="model-card">
-      <h2>Modelo 1 (complejo)</h2>
-      <p><strong>Predicción:</strong> {{ prediction1 }}</p>
-      <p><strong>Precisión global:</strong> {{ accuracy1 }}%</p>
-      <p><strong>Tiempo de predicción:</strong> {{ time1 }} s</p>
+      
       <h4>Probabilidades:</h4>
-      <ul style="list-style: none; padding: 0;">
+      <ul class="probabilities-list">
         {% for class_name, percent in percentages1 %}
           <li>{{ class_name }}: {{ percent }}%</li>
         {% endfor %}
       </ul>
-      <canvas id="chart1" width="300" height="200"></canvas>
+      
+      <div class="chart-container">
+        <canvas id="chart1"></canvas>
+      </div>
     </div>
 
-    <!-- Modelo 2 -->
-    <div class="model-card">
-      <h2>Modelo 2 (ligero)</h2>
-      <p><strong>Predicción:</strong> {{ prediction2 }}</p>
-      <p><strong>Precisión global:</strong> {{ accuracy2 }}%</p>
-      <p><strong>Tiempo de predicción:</strong> {{ time2 }} s</p>
+    <div class="comparison-card">
+      <h2>Modelo Ligero</h2>
+      <div class="prediction-result">{{ prediction2 }} ({{ confidence2 }}%)</div>
+      <div class="confidence-bar-container">
+        <div class="confidence-bar model2-bar" data-width="{{ confidence2 }}">{{ confidence2 }}%</div>
+      </div>
+      
+      <div class="model-details">
+        <p><strong>Accuracy:</strong> {{ accuracy2 }}%</p>
+        <p><strong>Tiempo:</strong> {{ time2 }} s</p>
+      </div>
+      
       <h4>Probabilidades:</h4>
-      <ul style="list-style: none; padding: 0;">
+      <ul class="probabilities-list">
         {% for class_name, percent in percentages2 %}
           <li>{{ class_name }}: {{ percent }}%</li>
         {% endfor %}
       </ul>
-      <canvas id="chart2" width="300" height="200"></canvas>
+      
+      <div class="chart-container">
+        <canvas id="chart2"></canvas>
+      </div>
     </div>
   </div>
 
-  <img id="uploaded-image" src="{{ url_for('static', filename='uploads/' + filename) }}">
+  <div class="image-container">
+    <img id="uploaded-image" src="{{ url_for('static', filename='uploads/' + filename) }}" alt="Imagen subida">
+  </div>
 </div>
 {% endif %}
 
-<!-- Chart.js CDN -->
+<!-- Datos para las gráficas -->
+{% if prediction1 and prediction2 and percentages1 and percentages2 %}
+<script type="application/json" id="chart-data">
+{
+  "labels": {{ class_names | tojson }},
+  "model1Data": {{ percentages1 | map(attribute=1) | list | tojson }},
+  "model2Data": {{ percentages2 | map(attribute=1) | list | tojson }}
+}
+</script>
+{% endif %}
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<!-- JS mejorado -->
 <script>
+  // Configuración de barras de confianza
+  document.querySelectorAll('.confidence-bar').forEach(bar => {
+    const width = bar.getAttribute('data-width');
+    if (width) {
+      bar.style.width = `${width}%`;
+    }
+  });
+
+  // Funcionalidad del drag & drop
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
   const imagePreview = document.getElementById('image-preview');
   const loader = document.getElementById('loader');
-  const form = document.querySelector('form');
+  const form = document.getElementById('uploadForm');
+  const fileInfo = document.getElementById('fileInfo');
+  const submitBtn = document.getElementById('submitBtn');
 
-  // Vista previa
-  fileInput.addEventListener('change', function(e) {
-    if (e.target.files[0]) {
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        imagePreview.src = e.target.result;
-        imagePreview.style.display = 'block';
-      }
-      reader.readAsDataURL(e.target.files[0]);
+  const allowedFormats = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff'];
+
+  function getFileExtension(filename) {
+    return filename.split('.').pop().toLowerCase();
+  }
+
+  function isValidFile(file) {
+    const extension = getFileExtension(file.name);
+    return allowedFormats.includes(extension);
+  }
+
+  function isWebPFile(file) {
+    return getFileExtension(file.name) === 'webp';
+  }
+
+  function showFileError(message) {
+    dropzone.classList.add('error');
+    fileInfo.innerHTML = `<span style="color: var(--error);"> ${message}</span>`;
+    submitBtn.disabled = true;
+    setTimeout(() => {
+      dropzone.classList.remove('error');
+    }, 3000);
+  }
+
+  function showFileSuccess(filename) {
+    dropzone.classList.remove('error');
+    fileInfo.innerHTML = `<span style="color: var(--success);"> Archivo seleccionado: ${filename}</span>`;
+    submitBtn.disabled = false;
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+
+    if (isWebPFile(file)) {
+      showFileError('Los archivos WebP no son compatibles. Usa JPG o PNG.');
+      fileInput.value = '';
+      imagePreview.style.display = 'none';
+      return;
     }
+
+    if (!isValidFile(file)) {
+      showFileError('Formato no permitido. Usa: JPG o PNG.');
+      fileInput.value = '';
+      imagePreview.style.display = 'none';
+      return;
+    }
+
+    showFileSuccess(file.name);
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      imagePreview.src = e.target.result;
+      imagePreview.style.display = 'block';
+    }
+    reader.readAsDataURL(file);
+  }
+
+  fileInput.addEventListener('change', function(e) {
+    handleFile(e.target.files[0]);
   });
 
-  // Drag and drop
   dropzone.addEventListener('click', () => fileInput.click());
+  
   dropzone.addEventListener('dragover', (e) => {
     e.preventDefault();
     dropzone.classList.add('dragover');
   });
+  
   dropzone.addEventListener('dragleave', () => {
     dropzone.classList.remove('dragover');
   });
+  
   dropzone.addEventListener('drop', (e) => {
     e.preventDefault();
-    fileInput.files = e.dataTransfer.files;
     dropzone.classList.remove('dragover');
-    // Mostrar vista previa
-    if (e.dataTransfer.files[0]) {
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        imagePreview.src = e.target.result;
-        imagePreview.style.display = 'block';
-      }
-      reader.readAsDataURL(e.dataTransfer.files[0]);
-    }
+    const file = e.dataTransfer.files[0];
+    fileInput.files = e.dataTransfer.files;
+    handleFile(file);
   });
 
-  // Mostrar loader al enviar
-  form.addEventListener('submit', function() {
-    loader.style.display = 'block';
-  });
-
-  // SOLUCIÓN 1: Establecer el ancho de las barras de confianza via JavaScript
-  document.addEventListener('DOMContentLoaded', function() {
-    // Barra del modelo 1
-    const bar1 = document.getElementById('confidence-bar-1');
-    if (bar1) {
-      const confidence1 = bar1.getAttribute('data-confidence');
-      bar1.style.width = confidence1 + '%';
+  form.addEventListener('submit', function(e) {
+    const file = fileInput.files[0];
+    if (!file) {
+      e.preventDefault();
+      showFileError('Por favor selecciona un archivo');
+      return;
     }
     
-    // Barra del modelo 2
-    const bar2 = document.getElementById('confidence-bar-2');
-    if (bar2) {
-      const confidence2 = bar2.getAttribute('data-confidence');
-      bar2.style.width = confidence2 + '%';
+    if (isWebPFile(file) || !isValidFile(file)) {
+      e.preventDefault();
+      return;
     }
+    
+    loader.style.display = 'block';
+    submitBtn.disabled = true;
   });
+
+  // Ocultar mensajes flash después de 5 segundos
+  setTimeout(() => {
+    const flashMessages = document.querySelectorAll('.flash-message');
+    flashMessages.forEach(msg => {
+      msg.style.transition = 'opacity 0.5s ease-out';
+      msg.style.opacity = '0';
+      setTimeout(() => msg.remove(), 500);
+    });
+  }, 5000);
+
+  // Configuración de gráficas - Solo si hay datos disponibles
+  const chartDataElement = document.getElementById('chart-data');
+  if (chartDataElement) {
+    const chartData = JSON.parse(chartDataElement.textContent);
+    
+    const labels = chartData.labels;
+    const model1Data = chartData.model1Data;
+    const model2Data = chartData.model2Data;
+
+    // Configuración común para ambas gráficas
+    const chartConfig = {
+      type: 'bar',
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: false
+          },
+          title: {
+            display: true,
+            text: 'Distribución de probabilidades',
+            font: {
+              size: 14
+            }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                return `${context.dataset.label}: ${context.raw}%`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            max: 100,
+            ticks: {
+              callback: function(value) {
+                return value + '%';
+              },
+              font: {
+                size: 11
+              }
+            },
+            title: {
+              display: true,
+              text: 'Probabilidad'
+            }
+          },
+          x: {
+            ticks: {
+              maxRotation: 45,
+              minRotation: 30,
+              font: {
+                size: 11
+              }
+            },
+            title: {
+              display: true,
+              text: 'Clases de flores'
+            }
+          }
+        },
+        layout: {
+          padding: {
+            left: 10,
+            right: 10,
+            top: 10,
+            bottom: 30  // Más espacio para los labels del eje X
+          }
+        }
+      }
+    };
+
+    // Gráfica para Modelo 1
+    const ctx1 = document.getElementById('chart1').getContext('2d');
+    new Chart(ctx1, {
+      ...chartConfig,
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Confianza (%)',
+          data: model1Data,
+          backgroundColor: [
+            '#e91e63', '#f48fb1', '#ec407a', '#ad1457', '#c2185b'
+          ],
+          borderColor: '#c2185b',
+          borderWidth: 1,
+          borderRadius: 5,
+          borderSkipped: false,
+        }]
+      }
+    });
+
+    // Gráfica para Modelo 2
+    const ctx2 = document.getElementById('chart2').getContext('2d');
+    new Chart(ctx2, {
+      ...chartConfig,
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Confianza (%)',
+          data: model2Data,
+          backgroundColor: [
+            '#4caf50', '#81c784', '#66bb6a', '#2e7d32', '#388e3c'
+          ],
+          borderColor: '#388e3c',
+          borderWidth: 1,
+          borderRadius: 5,
+          borderSkipped: false,
+        }]
+      }
+    });
+  }
 </script>
-
-{% if prediction1 and prediction2 and class_names and percentages1 and percentages2 %}
-  <!-- Datos embebidos en JSON -->
-  <script id="model-data" type="application/json">
-    {
-      "labels": {{ class_names | tojson }},
-      "model1": {{ percentages1 | map(attribute=1) | list | tojson }},
-      "model2": {{ percentages2 | map(attribute=1) | list | tojson }}
-    }
-  </script>
-
-  <script>
-    const jsonScript = document.getElementById('model-data');
-    if (jsonScript) {
-      const { labels, model1, model2 } = JSON.parse(jsonScript.textContent);
-
-      new Chart(document.getElementById('chart1'), {
-        type: 'bar',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'Modelo 1',
-            data: model1,
-            backgroundColor: '#26a69a'
-          }]
-        },
-        options: {
-          scales: {
-            y: { beginAtZero: true, max: 100 }
-          }
-        }
-      });
-
-      new Chart(document.getElementById('chart2'), {
-        type: 'bar',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'Modelo 2',
-            data: model2,
-            backgroundColor: '#7e57c2'
-          }]
-        },
-        options: {
-          scales: {
-            y: { beginAtZero: true, max: 100 }
-          }
-        }
-      });
-    }
-  </script>
-{% endif %}
-
 </body>
 </html>
