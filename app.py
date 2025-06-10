@@ -158,11 +158,8 @@ def index():
 
     return render_template("index.html")
 
-@app.before_first_request
-def startup():
-    """Cargar modelos al iniciar la aplicación"""
-    thread = Thread(target=load_models)
-    thread.start()
+# Cargar modelos al importar el módulo
+Thread(target=load_models).start()
 
 if __name__ == '__main__':
     # Configurar logging
