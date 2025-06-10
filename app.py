@@ -77,4 +77,7 @@ def index():
     return render_template("index.html")
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Obtener puerto de las variables de entorno (Render lo proporciona)
+    port = int(os.environ.get('PORT', 5000))
+    # Importante: host='0.0.0.0' permite acceso externo
+    app.run(host='0.0.0.0', port=port, debug=False)
